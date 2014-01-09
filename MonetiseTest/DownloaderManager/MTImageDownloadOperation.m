@@ -1,0 +1,135 @@
+//
+//  MTImageDownloadOperation.m
+//  MonetiseTest
+//
+//  Created by Abraham Tomás Díaz Abreu on 20/03/13.
+//  Copyright (c) 2013 Abraham Tomás Díaz Abreu. All rights reserved.
+//
+
+#import "MTImageDownloadOperation.h"
+
+@interface MTImageDownloadOperation ()
+{
+    BOOL executing;
+    BOOL finished;
+}
+@end
+
+@implementation MTImageDownloadOperation
+
+- (BOOL)isConcurrent {
+    return YES;
+}
+
+- (BOOL)isExecuting {
+    return executing;
+}
+
+- (BOOL)isFinished {
+    return finished;
+}
+
+- (void)completeOperation {
+    [self willChangeValueForKey:@"isFinished"];
+    [self willChangeValueForKey:@"isExecuting"];
+    executing = NO;
+    finished = YES;
+    [self didChangeValueForKey:@"isExecuting"];
+    [self didChangeValueForKey:@"isFinished"];
+}
+
+- (id) initWithProtocol:(NSObject<MTImageDownloadOperationDelegate>*)protocolParam withURL:(NSString*)url withIndex:(NSInteger)indexParam
+{
+    if (self = [super init])
+    {
+        self.protocol = protocolParam;
+        self.urlImage = url;
+        self.index = indexParam;
+        
+        executing = NO;
+        finished = NO;
+    }
+    return self;
+}
+
+- (void)start {
+    
+    if (![NSThread isMainThread])
+    {
+        [self performSelectorOnMainThread:@selector(start)
+                               withObject:nil waitUntilDone:NO];
+        return;
+    }
+    
+    // Always check for cancellation before launching the task.
+    if ([self isCancelled])
+    {
+        // Must move the operation to the finished state if it is canceled.
+        [self willChangeValueForKey:@"isFinished"];
+        finished = YES;
+        [self didChangeValueForKey:@"isFinished"];
+        return;
+    }
+    
+    // If the operation is not canceled, begin executing the task.
+    [self willChangeValueForKey:@"isExecuting"];
+    executing = YES;
+    [self didChangeValueForKey:@"isExecuting"];
+    
+    fileData = [[NSMutableData alloc] init];
+    NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:self.urlImage]];
+    NSURLConnection *connection = [[NSURLConnection alloc] initWithRequest:request delegate:self startImmediately:YES];
+
+    if(!connection)
+    {
+        [self.protocol imageFailed];
+        [self completeOperation];
+    }
+}
+
+#pragma mark NSURLConnection Delegate
+
+-(void)connection:(NSURLConnection *)connection didFailWithError:(NSError *)error
+{
+    [self.protocol imageFailed];
+    [self completeOperation];
+}
+
+-(void)connection:(NSURLConnection *)connection didReceiveResponse:(NSURLResponse *)response
+{
+    if([response respondsToSelector:@selector(statusCode)])
+    {
+        int statusCode = [((NSHTTPURLResponse *)response) statusCode];
+        if (statusCode >= 400)
+        {
+            [connection cancel];
+                [self.protocol imageFailed];
+            
+            [self completeOperation];
+        }
+    }
+}
+
+-(void)connection:(NSURLConnection *)connection didReceiveData:(NSData *)data
+{
+    [fileData appendData:data];
+}
+
+-(void)connectionDidFinishLoading:(NSURLConnection *)connection
+{
+    
+    if(fileData == nil)
+    {
+        [self.protocol imageFailed];
+    }
+    else
+    {
+        UIImage *image = [UIImage imageWithData:fileData];
+        [self.protocol imageDownloaded:image forIndex:self.index];
+    }
+    
+    [self completeOperation];
+}
+
+
+@end
